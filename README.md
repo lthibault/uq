@@ -1,4 +1,10 @@
 # uq
+
+[![Godoc Reference](https://img.shields.io/badge/godoc-reference-blue.svg?style=flat-square)](https://godoc.org/github.com/lthibault/uq)
+[![Go Report Card](https://goreportcard.com/badge/github.com/lthibault/uq?style=flat-square)](https://goreportcard.com/report/github.com/lthibault/uq)
+[![tests](https://github.com/lthibault/uq/workflows/Go/badge.svg)](https://github.com/lthibault/uq/actions/workflows/go.yml)
+
+
 Fast unbounded queue with efficient allocation
 
 ## Benchmarks
