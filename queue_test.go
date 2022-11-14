@@ -3,6 +3,7 @@ package uq
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,7 +75,7 @@ func TestList(t *testing.T) {
 
 		// Check invariants for last element
 		require.Nil(t, last.next, "should return last element")
-		require.True(t, last.queue.Full(), "last element should be full")
+		require.False(t, last.queue.Empty(), "last element should contain elements")
 
 		// Check invariants for first element
 		require.Equal(t, last, first.next, "first element should point to last")
@@ -90,6 +91,15 @@ func TestList(t *testing.T) {
 			require.NotNil(t, first, "should not return nil list")
 			require.True(t, ok, "should report success")
 		}
+
+		val, next, ok := first.Shift()
+		require.False(t, ok, "should be empty")
+		require.NotNil(t, first, next, "next link should be first")
+		require.Zero(t, val, "should return zero-value")
+
+		_, next, _ = next.Shift()
+		require.Equal(t, size, next.queue.Cap(),
+			"should not shrink beyond cap=%d", size)
 
 		require.Nil(t, first.next, "should be head")
 		require.True(t, first.queue.Empty(), "queue should be empty")
@@ -108,16 +118,25 @@ func BenchmarkList(b *testing.B) {
 		}
 
 		b.ResetTimer()
-		b.ReportMetric(float64(bufs), "links")
 
 		var (
 			first = new(list[int])
 			last  = first
+			next  *list[int]
+			links int
 		)
 
 		for i := 0; i < b.N; i++ {
-			last = last.Push(i)
+			if next = last.Push(i); last != next {
+				links++
+			}
+
+			last = next
 		}
+
+		b.StopTimer()
+		b.ReportMetric(float64(links), "links")
+		b.ReportMetric(float64(links)/float64(b.N), "links/op")
 	})
 
 	b.Run("Shift", func(b *testing.B) {
@@ -129,8 +148,10 @@ func BenchmarkList(b *testing.B) {
 		}
 
 		var (
-			first = new(list[int])
-			last  = first
+			first   = new(list[int])
+			last    = first
+			next    *list[int]
+			unlinks int
 		)
 
 		for i := 0; i < b.N; i++ {
@@ -138,11 +159,18 @@ func BenchmarkList(b *testing.B) {
 		}
 
 		b.ResetTimer()
-		b.ReportMetric(float64(bufs), "unlinks")
 
 		for i := 0; i < b.N; i++ {
-			_, first, _ = first.Shift()
+			if _, next, _ = first.Shift(); first != next {
+				unlinks++
+			}
+
+			first = next
 		}
+
+		b.StopTimer()
+		b.ReportMetric(float64(unlinks), "unlinks")
+		b.ReportMetric(float64(unlinks)/float64(b.N), "unlinks/op")
 	})
 }
 
@@ -155,6 +183,15 @@ func TestRingBuffer(t *testing.T) {
 	t.Helper()
 
 	var rb rbuf[int]
+
+	t.Run("Empty", func(t *testing.T) {
+		// use separate rbuf to ensure lazy init works with Push/Shift
+		// in later tests.
+		var rb rbuf[int]
+		assert.True(t, rb.Empty(), "should initially be empty")
+		assert.False(t, rb.Full(), "should not initially be full")
+		assert.Zero(t, rb.Len(), "should initiallly have len=0")
+	})
 
 	t.Run("Push", func(t *testing.T) {
 		for i := 0; i < size; i++ {

@@ -1,9 +1,6 @@
 package uq
 
-const (
-	size = 64       // ring buffer capacity
-	mask = size - 1 // ring buffer slot-mask
-)
+const size = 64 // initial ring buffer capacity
 
 /*
 	queue
@@ -16,7 +13,7 @@ type Queue[T any] struct {
 func (q *Queue[T]) Push(val T) {
 	// empty?
 	if q.first == nil {
-		next := new(list[T]).Push(val) // TODO:  pool.Get().Push(val)
+		next := new(list[T]).Push(val)
 		q.first = next
 		q.last = next
 	} else {
@@ -45,26 +42,42 @@ func (l *list[T]) Push(val T) *list[T] {
 		return l
 	}
 
-	l.next = new(list[T]) // TODO:  pool.Get()
-	_ = l.next.Push(val)  // always succeeds
-	return l.next         // return the last element
+	l.next = l.grow().Push(val)
+	return l.next // return the last element
 }
 
-func (l *list[T]) Shift() (T, *list[T], bool) {
-	// l not empty OR l is head?
-	if val, ok := l.queue.Shift(); ok || l.next == nil {
-		return val, l, ok
+func (l *list[T]) Shift() (t T, next *list[T], ok bool) {
+	if l != nil {
+		// l not empty OR l is head?
+		if t, ok = l.queue.Shift(); ok {
+			next = l
+		} else if t, next, ok = l.next.Shift(); next == nil {
+			next = l.shrink()
+		}
 	}
 
-	// TODO: pool.Put(l)
-	defer l.Reset()
-
-	return l.next.Shift()
+	return
 }
 
-func (l *list[T]) Reset() {
-	l.next = nil
-	l.queue.Reset()
+func (l *list[T]) grow() *list[T] {
+	return &list[T]{
+		queue: rbuf[T]{
+			// Increase array capacity geometrically, with r = 2.
+			// This gives us amortized O(1) performance.
+			array: make([]T, l.queue.Cap()<<1),
+		},
+	}
+}
+
+func (l *list[T]) shrink() *list[T] {
+	// Only shrink if not at the minimum size.
+	if l.queue.Cap() != size {
+		l.queue = rbuf[T]{
+			array: make([]T, l.queue.Cap()>>1),
+		}
+	}
+
+	return l
 }
 
 /*
@@ -73,25 +86,37 @@ func (l *list[T]) Reset() {
 
 type rbuf[T any] struct {
 	read, write uint32 // uint32 ensures both fit in single cache line
-	array       [size]T
+	array       []T
 }
 
 func (rb *rbuf[T]) Len() int {
 	return int(rb.write - rb.read)
 }
 
+func (rb *rbuf[T]) Cap() int {
+	return len(rb.array)
+}
+
 func (rb *rbuf[T]) Empty() bool {
+	if rb.array == nil {
+		rb.array = make([]T, size)
+	}
+
 	return rb.read == rb.write
 }
 
 func (rb *rbuf[T]) Full() bool {
-	return rb.Len() == size
+	if rb.array == nil {
+		rb.array = make([]T, size)
+	}
+
+	return rb.Len() == len(rb.array)
 }
 
 func (rb *rbuf[T]) Push(val T) (ok bool) {
 	if ok = !rb.Full(); ok {
 		rb.write++
-		rb.array[rb.write&mask] = val
+		rb.array[rb.write&rb.mask()] = val
 	}
 
 	return
@@ -100,13 +125,12 @@ func (rb *rbuf[T]) Push(val T) (ok bool) {
 func (rb *rbuf[T]) Shift() (val T, ok bool) {
 	if ok = !rb.Empty(); ok {
 		rb.read++
-		val = rb.array[rb.read&mask]
+		val = rb.array[rb.read&rb.mask()]
 	}
 
 	return
 }
 
-func (rb *rbuf[T]) Reset() {
-	rb.read = 0
-	rb.write = 0
+func (rb *rbuf[T]) mask() uint32 {
+	return uint32(len(rb.array)) - 1
 }
